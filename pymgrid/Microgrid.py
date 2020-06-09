@@ -582,7 +582,7 @@ class Microgrid:
                                                      self._df_record_co2, self.grid.co2)
 
             self._df_record_cost = self._record_cost(self._df_record_actual_production.iloc[-1,:].to_dict(),
-                                                               self._df_record_cost, self.grid.price_import, self.grid.price_export)
+                                                               self._df_record_cost, self._df_record_co2, self.grid.price_import, self.grid.price_export)
             self._df_record_state = self._update_status(control_dict,
                                                         self._df_record_state, self._next_load, self._next_pv,
                                                         self._next_grid_status, self._next_grid_price_import,
@@ -595,7 +595,7 @@ class Microgrid:
                                                    self._df_record_co2)
 
             self._df_record_cost = self._record_cost(self._df_record_actual_production.iloc[-1, :].to_dict(),
-                                                     self._df_record_cost)
+                                                     self._df_record_cost, self._df_record_co2)
             self._df_record_state = self._update_status(control_dict,
                                                         self._df_record_state, self._next_load, self._next_pv)
 
@@ -1074,7 +1074,7 @@ class Microgrid:
             cost+= (control_dict['battery_charge']+control_dict['battery_discharge'])*self.parameters['battery_cost_cycle'].values[0]
 
 
-        cost+= self.parameters['cost_co2']*df_co2.iloc[-1,0]
+        cost+= self.parameters['cost_co2'].values[0]*df_co2.iloc[-1,0]
 
         cost_dict= {'cost': cost}
 
@@ -1572,7 +1572,7 @@ class Microgrid:
 
                 self._baseline_priority_list_cost = self._record_cost(
                     self._baseline_priority_list_record_production.iloc[-1, :].to_dict(),
-                    self._baseline_priority_list_cost, self._grid_price_import.iloc[i,0], self._grid_price_export.iloc[i,0])
+                    self._baseline_priority_list_cost,  self._baseline_priority_list_co2, self._grid_price_import.iloc[i,0], self._grid_price_export.iloc[i,0])
             else:
 
                 self._baseline_priority_list_update_status = self._update_status(
@@ -1585,7 +1585,7 @@ class Microgrid:
 
                 self._baseline_priority_list_cost = self._record_cost(
                     self._baseline_priority_list_record_production.iloc[-1, :].to_dict(),
-                    self._baseline_priority_list_cost)
+                    self._baseline_priority_list_cost,  self._baseline_priority_list_co2)
 
         self._has_run_rule_based_baseline = True
 
@@ -1656,7 +1656,7 @@ class Microgrid:
 
                 self._baseline_linprog_cost = self._record_cost(
                     self._baseline_linprog_record_production.iloc[-1, :].to_dict(),
-                    self._baseline_linprog_cost, self._grid_price_import.iloc[i,0], self._grid_price_export.iloc[i,0])
+                    self._baseline_linprog_cost, self._baseline_linprog_co2, self._grid_price_import.iloc[i,0], self._grid_price_export.iloc[i,0])
 
 
 
@@ -1672,7 +1672,7 @@ class Microgrid:
 
                 self._baseline_linprog_cost = self._record_cost(
                     self._baseline_linprog_record_production.iloc[-1, :].to_dict(),
-                    self._baseline_linprog_cost)
+                    self._baseline_linprog_cost, self._baseline_linprog_co2)
 
 
             self._has_run_mpc_baseline = True
