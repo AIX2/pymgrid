@@ -143,6 +143,7 @@ class Genset:
         self.p_min = param['genset_pmin'].values[0]
         self.p_max = param['genset_pmax'].values[0]
         self.fuel_cost = param['fuel_cost'].values[0]
+        self.co2 = param['genset_co2'].values[0]
 
 
 class Grid:
@@ -171,6 +172,8 @@ class Grid:
     status: int, binary
         Binary value representing whether the grid is connected or not (for example 0 represent a black-out of the
         main grid).
+    co2: float
+        CO2 intensity per kWh of the grid
 
     Notes
     -----
@@ -186,12 +189,13 @@ class Grid:
     You can access the status of the grid for example with:
     >>> m_gen.microgrids[0].grid.status
     """
-    def __init__(self, param, status, price_import, price_export):
+    def __init__(self, param, status, price_import, price_export, co2):
         self.power_export = param['grid_power_export'].values[0]
         self.power_import = param['grid_power_import'].values[0]
         self.price_export = price_export #param['grid_price_export'].values[0]
         self.price_import = price_import # param['grid_price_import'].values[0]
         self.status = status
+        self.co2 = co2
 
 
 class Microgrid:
@@ -336,10 +340,12 @@ class Microgrid:
             #todo if we move to time series of price
             self._grid_price_import=parameters['grid_price_import']
             self._grid_price_export=parameters['grid_price_export']
+            self._grid_co2 = parameters['grid_co2']
 
             self._next_grid_status = self._grid_status_ts.iloc[0, 0]
             self._next_grid_price_export = self._grid_price_export.iloc[0, 0]
             self._next_grid_price_import = self._grid_price_import.iloc[0, 0]
+            self._next_grid_co2 = self._grid_co2.iloc[0, 0]
 
         # those dataframe record what is hapepning at each time step
         self._df_record_control_dict=parameters['df_actions']
@@ -347,6 +353,7 @@ class Microgrid:
         self._df_record_actual_production = parameters['df_actual_generation']
         self._df_record_cost = parameters['df_cost']
         self._df_cost_per_epochs = parameters['df_cost']
+        self._df_record_co2 = parameters['df_co2']
         self.horizon = horizon
         self._tracking_timestep = 0
         self._data_length = min(self._load_ts.shape[0], self._pv_ts.shape[0])
@@ -369,19 +376,24 @@ class Microgrid:
         if self.architecture['grid'] == 1:
             self.grid = Grid(self.parameters, self._grid_status_ts.iloc[0, 0],
                              self._grid_price_import.iloc[0, 0],
-                             self._grid_price_export.iloc[0, 0])
+                             self._grid_price_export.iloc[0, 0],
+                             self._grid_co2.iloc[0, 0])
 
 
     def set_horizon(self, horizon):
         """Function used to change the horizon of the simulation."""
         self.horizon = horizon
 
+    def set_cost_co2(self, co2_cost):
+        """Function used to change the horizon of the simulation."""
+        self.parameters['cost_co2'] = co2_cost
+
     def get_data(self):
         """Function to return the time series used in the microgrid"""
         return self._load_ts, self._pv_ts
 
     def get_training_testing_data(self):
-
+        """Function to return the time series for the training and testing sets and index that delimits both."""
         if self._has_train_test_split == True:
 
             return self._limit_index, self._load_train, self._pv_train, self._load_test, self._pv_test
@@ -402,6 +414,10 @@ class Microgrid:
     def get_cost(self):
         """ Function that returns the cost associated the operation of the last time step. """
         return self._df_record_cost.iloc[-1].values[0]
+
+    def get_co2(self):
+        """ Function that returns the co2 emissions associated to the operation of the last time step. """
+        return self._df_record_co2.iloc[-1].values[0]
 
 
     def get_updated_values(self):
@@ -431,6 +447,7 @@ class Microgrid:
         if self.architecture['grid'] == 1:
             forecast['grid_status'] = self.forecast_grid_status()
             forecast['grid_import'], forecast['grid_export'] = self.forecast_grid_prices()
+            forecast['grid_co2'] = self.forecast_grid_co2()
 
         return forecast
 
@@ -478,6 +495,23 @@ class Microgrid:
 
         if self._data_set_to_use == 'all':
             forecast = self._grid_status_ts.iloc[
+               self._tracking_timestep:self._tracking_timestep + self.horizon].values.flatten()
+
+        return forecast
+
+    def forecast_grid_co2(self):
+        """ Function that returns the grid_status forecasted values for the next horizon. """
+        forecast = np.nan
+        if self._data_set_to_use == 'training':
+            forecast = self._grid_co2_train.iloc[
+               self._tracking_timestep:self._tracking_timestep + self.horizon].values.flatten()
+
+        if self._data_set_to_use == 'testing':
+            forecast = self._grid_co2_test.iloc[
+               self._tracking_timestep:self._tracking_timestep + self.horizon].values.flatten()
+
+        if self._data_set_to_use == 'all':
+            forecast = self._grid_co2.iloc[
                self._tracking_timestep:self._tracking_timestep + self.horizon].values.flatten()
 
         return forecast
@@ -544,6 +578,9 @@ class Microgrid:
 
         if self.architecture['grid'] == 1:
 
+            self._df_record_co2 = self._record_co2(self._df_record_actual_production.iloc[-1, :].to_dict(),
+                                                     self._df_record_co2, self.grid.co2)
+
             self._df_record_cost = self._record_cost(self._df_record_actual_production.iloc[-1,:].to_dict(),
                                                                self._df_record_cost, self.grid.price_import, self.grid.price_export)
             self._df_record_state = self._update_status(control_dict,
@@ -553,6 +590,10 @@ class Microgrid:
 
 
         else:
+
+            self._df_record_co2 = self._record_co2(self._df_record_actual_production.iloc[-1, :].to_dict(),
+                                                   self._df_record_co2)
+
             self._df_record_cost = self._record_cost(self._df_record_actual_production.iloc[-1, :].to_dict(),
                                                      self._df_record_cost)
             self._df_record_state = self._update_status(control_dict,
@@ -630,6 +671,9 @@ class Microgrid:
                 self._grid_price_export_train = self._grid_price_export.iloc[:self._limit_index]
                 self._grid_price_export_test = self._grid_price_export.iloc[self._limit_index:]
 
+                self._grid_co2_train = self._grid_co2.iloc[:self._limit_index]
+                self._grid_co2_test = self._grid_co2.iloc[self._limit_index:]
+
             self._has_train_test_split = True
             self._data_set_to_use_default = 'training'
             self._data_set_to_use = 'training'
@@ -672,29 +716,35 @@ class Microgrid:
                 self.grid.status = self._grid_status_train.iloc[self._tracking_timestep, 0]
                 self.grid.price_import = self._grid_price_import_train.iloc[self._tracking_timestep,0]
                 self.grid.price_export = self._grid_price_export_train.iloc[self._tracking_timestep,0]
+                self.grid.co2 = self._grid_co2_train.iloc[self._tracking_timestep, 0]
 
                 self._next_grid_status = self._grid_status_train.iloc[self._tracking_timestep +1, 0]
                 self._next_grid_price_import = self._grid_price_import_train.iloc[self._tracking_timestep +1, 0]
                 self._next_grid_price_export = self._grid_price_export_train.iloc[self._tracking_timestep +1, 0]
+                self._next_grid_co2 = self._grid_co2_train.iloc[self._tracking_timestep + 1, 0]
 
             if self._data_set_to_use == 'testing':
                 self.grid.status = self._grid_status_test.iloc[self._tracking_timestep, 0]
                 self.grid.price_import = self._grid_price_import_test.iloc[self._tracking_timestep, 0]
                 self.grid.price_export = self._grid_price_export_test.iloc[self._tracking_timestep, 0]
+                self.grid.co2 = self._grid_co2_test.iloc[self._tracking_timestep, 0]
 
                 self._next_grid_status = self._grid_status_test.iloc[self._tracking_timestep + 1, 0]
                 self._next_grid_price_import = self._grid_price_import_test.iloc[self._tracking_timestep + 1, 0]
                 self._next_grid_price_export = self._grid_price_export_test.iloc[self._tracking_timestep + 1, 0]
+                self._next_grid_co2 = self._grid_co2_test.iloc[self._tracking_timestep + 1, 0]
 
 
             if self._data_set_to_use == 'all':
                 self.grid.status = self._grid_status_ts.iloc[self._tracking_timestep, 0]
                 self.grid.price_import = self._grid_price_import.iloc[self._tracking_timestep, 0]
                 self.grid.price_export = self._grid_price_export.iloc[self._tracking_timestep, 0]
+                self.grid.co2 = self._grid_co2.iloc[self._tracking_timestep, 0]
 
                 self._next_grid_status = self._grid_status_ts.iloc[self._tracking_timestep + 1, 0]
                 self._next_grid_price_import = self._grid_price_import.iloc[self._tracking_timestep + 1, 0]
                 self._next_grid_price_export = self._grid_price_export.iloc[self._tracking_timestep + 1, 0]
+                self._next_grid_co2 = self._grid_co2.iloc[self._tracking_timestep + 1, 0]
 
         if self.architecture['battery'] == 1:
             self.battery.soc = self._df_record_state.battery_soc.iloc[-1]
@@ -712,6 +762,7 @@ class Microgrid:
         self._df_record_state = self._df_record_state.iloc[:1]
         self._df_record_actual_production = self._df_record_actual_production[0:0]
         self._df_record_cost = self._df_record_cost[0:0]
+        self._df_record_co2 = self._df_record_co2[0:0]
 
         self._tracking_timestep = 0
 
@@ -983,7 +1034,27 @@ class Microgrid:
 
         return df
 
-    def _record_cost(self, control_dict, df, cost_import=0, cost_export=0):
+
+    def _record_co2(self, control_dict, df, grid_co2=0):
+        """ This function record the cost of operating the microgrid at each time step."""
+        co2 = 0
+
+
+        if self.architecture['genset'] == 1:
+            co2 += control_dict['genset'] * self.parameters['genset_co2'].values[0]
+
+        if self.architecture['grid'] ==1:
+            co2 +=  grid_co2 * control_dict['grid_import']
+
+
+        cost_dict= {'co2': co2}
+
+
+        df = df.append({'co2': co2}, ignore_index=True)
+
+        return df
+
+    def _record_cost(self, control_dict, df, df_co2, cost_import=0, cost_export=0):
         """ This function record the cost of operating the microgrid at each time step."""
         cost = 0
         cost += control_dict['loss_load'] * self.parameters['cost_loss_load'].values[0]
@@ -1001,6 +1072,9 @@ class Microgrid:
 
         if self.architecture['battery'] ==1 :
             cost+= (control_dict['battery_charge']+control_dict['battery_discharge'])*self.parameters['battery_cost_cycle'].values[0]
+
+
+        cost+= self.parameters['cost_co2']*df_co2.iloc[-1,0]
 
         cost_dict= {'cost': cost}
 
@@ -1030,6 +1104,10 @@ class Microgrid:
 
     def print_control(self):
         fig1 = self._df_record_control_dict.iplot(asFigure=True)
+        iplot(fig1)
+
+    def print_co2(self):
+        fig1 = self._df_record_co2.iplot(asFigure=True)
         iplot(fig1)
 
     def print_cumsum_cost(self):
@@ -1432,6 +1510,7 @@ class Microgrid:
         self._baseline_priority_list_update_status = copy(self._df_record_state)
         self._baseline_priority_list_record_production = copy(self._df_record_actual_production)
         self._baseline_priority_list_cost = copy(self._df_record_cost)
+        self._baseline_priority_list_co2 = copy(self._df_record_co2)
 
         n = length - self.horizon
         print_ratio = n/100
@@ -1476,6 +1555,8 @@ class Microgrid:
                                                                                      self._baseline_priority_list_update_status)
 
 
+
+
             if self.architecture['grid']==1:
 
                 self._baseline_priority_list_update_status = self._update_status(
@@ -1486,6 +1567,8 @@ class Microgrid:
                     self._grid_price_import.iloc[i + 1].values[0],
                     self._grid_price_export.iloc[i + 1].values[0])
 
+                self._baseline_priority_list_co2 = self._record_co2(self._baseline_priority_list_record_production.iloc[-1, :].to_dict(),
+                                                                    self._baseline_priority_list_co2,self._grid_co2.iloc[i,0] )
 
                 self._baseline_priority_list_cost = self._record_cost(
                     self._baseline_priority_list_record_production.iloc[-1, :].to_dict(),
@@ -1496,6 +1579,9 @@ class Microgrid:
                     self._baseline_priority_list_record_production.iloc[-1, :].to_dict(),
                     self._baseline_priority_list_update_status, self._load_ts.iloc[i + 1].values[0],
                     self._pv_ts.iloc[i + 1].values[0])
+
+                self._baseline_priority_list_co2 = self._record_co2(self._baseline_priority_list_record_production.iloc[-1, :].to_dict(),
+                                                                    self._baseline_priority_list_co2)
 
                 self._baseline_priority_list_cost = self._record_cost(
                     self._baseline_priority_list_record_production.iloc[-1, :].to_dict(),
@@ -1510,6 +1596,7 @@ class Microgrid:
         self._baseline_linprog_update_status = copy(self._df_record_state)
         self._baseline_linprog_record_production = copy(self._df_record_actual_production)
         self._baseline_linprog_cost = copy(self._df_record_cost)
+        self._baseline_linprog_co2 = copy(self._df_record_co2)
 
         n = length - self.horizon
         print_ratio = n/100
@@ -1565,6 +1652,8 @@ class Microgrid:
                     self._grid_price_import.iloc[i + 1].values[0],
                     self._grid_price_export.iloc[i + 1].values[0])
 
+                self._baseline_linprog_co2 = self._record_co2(self._baseline_linprog_record_production.iloc[-1, :].to_dict(), self._baseline_linprog_co2, self._grid_co2.iloc[i,0])
+
                 self._baseline_linprog_cost = self._record_cost(
                     self._baseline_linprog_record_production.iloc[-1, :].to_dict(),
                     self._baseline_linprog_cost, self._grid_price_import.iloc[i,0], self._grid_price_export.iloc[i,0])
@@ -1578,6 +1667,8 @@ class Microgrid:
                     self._baseline_linprog_update_status,
                     self._load_ts.iloc[i + 1].values[0],
                     self._pv_ts.iloc[i + 1].values[0])
+
+                self._baseline_linprog_co2 = self._record_co2(self._baseline_linprog_record_production.iloc[-1, :].to_dict(), self._baseline_linprog_co2)
 
                 self._baseline_linprog_cost = self._record_cost(
                     self._baseline_linprog_record_production.iloc[-1, :].to_dict(),
