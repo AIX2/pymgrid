@@ -586,7 +586,7 @@ class Microgrid:
             self._df_record_state = self._update_status(control_dict,
                                                         self._df_record_state, self._next_load, self._next_pv,
                                                         self._next_grid_status, self._next_grid_price_import,
-                                                        self._next_grid_price_export)
+                                                        self._next_grid_price_export, self._next_grid_co2)
 
 
         else:
@@ -796,7 +796,7 @@ class Microgrid:
         return df
 
 
-    def _update_status(self, control_dict, df, next_load, next_pv, next_grid = 0, next_price_import =0, next_price_export = 0):
+    def _update_status(self, control_dict, df, next_load, next_pv, next_grid = 0, next_price_import =0, next_price_export = 0, next_co2 = 0):
         """ This function update the parameters of the microgrid that change with time. """
         #self.df_status = self.df_status.append(self.new_row, ignore_index=True)
 
@@ -830,6 +830,7 @@ class Microgrid:
             dict['grid_status'] = next_grid
             dict['grid_price_import'] = next_price_import
             dict['grid_price_export'] = next_price_export
+            dict['grid_co2'] = next_co2
 
 
 
@@ -1446,10 +1447,7 @@ class Microgrid:
                 total_cost += (p_charge[t] * cost_battery_cycle[t] + p_discharge[t] * cost_battery_cycle[t])
 
             soc_0 = status.iloc[-1]['battery_soc']
-            constraints += [battery_soc[0] == soc_0 + (p_charge[0] * parameters['battery_efficiency'].values[0]
-                                                       - p_discharge[0] / parameters['battery_efficiency'].values[
-                                                           0]) /
-                            parameters['battery_capacity'].values[0]]
+            constraints += [battery_soc[0] == soc_0]
             for t in range(1, horizon):
                 constraints += [
                     battery_soc[t] == battery_soc[t - 1] + (p_charge[t] * parameters['battery_efficiency'].values[0]
@@ -1565,7 +1563,8 @@ class Microgrid:
                     self._pv_ts.iloc[i + 1].values[0],
                     self._grid_status_ts.iloc[i + 1].values[0],
                     self._grid_price_import.iloc[i + 1].values[0],
-                    self._grid_price_export.iloc[i + 1].values[0])
+                    self._grid_price_export.iloc[i + 1].values[0],
+                    self._grid_co2.iloc[i + 1].values[0])
 
                 self._baseline_priority_list_co2 = self._record_co2(self._baseline_priority_list_record_production.iloc[-1, :].to_dict(),
                                                                     self._baseline_priority_list_co2,self._grid_co2.iloc[i,0] )
@@ -1650,7 +1649,8 @@ class Microgrid:
                     self._pv_ts.iloc[i + 1].values[0],
                     self._grid_status_ts.iloc[i + 1].values[0],
                     self._grid_price_import.iloc[i + 1].values[0],
-                    self._grid_price_export.iloc[i + 1].values[0])
+                    self._grid_price_export.iloc[i + 1].values[0],
+                    self._grid_co2.iloc[i + 1].values[0])
 
                 self._baseline_linprog_co2 = self._record_co2(self._baseline_linprog_record_production.iloc[-1, :].to_dict(), self._baseline_linprog_co2, self._grid_co2.iloc[i,0])
 
