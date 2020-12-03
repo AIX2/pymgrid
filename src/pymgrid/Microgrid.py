@@ -1392,7 +1392,8 @@ class Microgrid:
 
                     capa_to_charge = max(
                         (parameters['battery_soc_max'].values[0] * parameters['battery_capacity'].values[0] -
-                         status['battery_soc'].iloc[-1] *
+#                          status['battery_soc'].iloc[-1] *
+                         status['battery_soc'].loc[-1] *
                          parameters['battery_capacity'].values[0]
                          ) / self.parameters['battery_efficiency'].values[0], 0)
                     capa_to_discharge = max((status['battery_soc'].iloc[-1] *
